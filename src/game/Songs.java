@@ -33,7 +33,14 @@ import java.util.Map;
 final class Songs {
     private Songs() {}
 
-    enum Tune { FOREST, FOREST_BATTLE, CITY, CITY_BATTLE, FOREST_BOSS, CITY_BOSS, LAB, LAB_BOSS, LAB_BATTLE }
+    enum Tune { FOREST, FOREST_BATTLE, CITY, CITY_BATTLE, FOREST_BOSS, CITY_BOSS, LAB, LAB_BOSS, LAB_BATTLE, MAIN_MENU, BATTLE }
+
+    /**
+     * The recordings (in {@code res/music}): the main menu's theme, and the battle theme every fight plays (in place of
+     * the worlds' written ones). Each has a level correction in dB, so it's as loud as the rest (measured, see the sound tests).
+     */
+    static final String MAIN_MENU_FILE = "main_menu.wav", BATTLE_FILE = "battle.wav";
+    private static final double MAIN_MENU_TRIM = -5.5, BATTLE_TRIM = -5.5;
 
     private static final Map<Tune, Song> CACHE = new EnumMap<>(Tune.class);
 
@@ -48,6 +55,8 @@ final class Songs {
             case LAB -> lab();
             case LAB_BOSS -> labBoss();
             case LAB_BATTLE -> labBattle();
+            case MAIN_MENU -> Song.recorded("main-menu", new Track(MAIN_MENU_FILE, MAIN_MENU_TRIM));
+            case BATTLE -> Song.recorded("battle", new Track(BATTLE_FILE, BATTLE_TRIM));
         });
     }
 

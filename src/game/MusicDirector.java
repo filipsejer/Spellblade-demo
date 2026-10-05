@@ -5,8 +5,9 @@ import game.Songs.Tune;
 
 /**
  * Decides which music should be playing from what is happening in the game. It is a pure function of the world, so it is
- * easy to test: the calm theme while you explore; in a fight, the world's battle theme (a few bars alone, then the
- * whole band, swelling further during a fight's set pieces: a nest, a relay, a specimen, Copper or the engine); the boss piece for the guardian (with its second
+ * easy to test: the recorded theme on the main menu; the calm theme while you explore; in a fight, the recorded battle
+ * theme (or, without it, the world's written one: a few bars alone, then the whole band, swelling further during a
+ * fight's set pieces: a nest, a relay, a specimen, Copper or the engine); the boss piece for the guardian (with its second
  * wave of parts below half health); the calm theme again once the way home is open; silence after a defeat; and the
  * music holding its breath while you talk to someone.
  */
@@ -24,12 +25,16 @@ final class MusicDirector {
         Choice(Tune tune, Mood mood, boolean paused, int bed, double bedLevel) { this(tune, mood, paused, bed, bedLevel, false); }
     }
 
+    private static final boolean MENU_RECORDED = Track.exists(Songs.MAIN_MENU_FILE), BATTLE_RECORDED = Track.exists(Songs.BATTLE_FILE);
+
     static Choice choose(World w) {
         Theme theme = w.level.theme;
         Tune calm = switch (theme) { case FOREST -> Tune.FOREST; case CITY -> Tune.CITY; case LAB -> Tune.LAB; };
         int bed = switch (theme) { case FOREST -> 1; case CITY -> 2; case LAB -> 3; };
         return switch (w.state) {
-            case TITLE, SLOTS -> new Choice(Tune.FOREST, Mood.CALM, false, 1, 0.6);
+            case TITLE, SLOTS -> MENU_RECORDED                         // the recorded menu theme (the forest's tune if it's missing)
+                ? new Choice(Tune.MAIN_MENU, Mood.CALM, false, 0, 0)
+                : new Choice(Tune.FOREST, Mood.CALM, false, 1, 0.6);
             case ARMORY -> new Choice(calm, Mood.CALM, true, bed, 0.6);
             case RESULTS -> w.run != null && w.run.outcome == Run.Outcome.VICTORY ? new Choice(calm, Mood.CALM, false, bed, 0.5) : new Choice(null, Mood.CALM, false, 0, 0);
             default -> {
@@ -42,7 +47,8 @@ final class MusicDirector {
                     }
                     if (w.run.bossDead) yield new Choice(calm, Mood.CALM, muffled, bed, 1.0);   // the way home is open: the calm theme again
                     Mood mood = w.run.time < BATTLE_INTRO ? Mood.CALM : intense(w) ? Mood.PEAK : Mood.FIGHT;
-                    Tune battle = switch (theme) { case FOREST -> Tune.FOREST_BATTLE; case CITY -> Tune.CITY_BATTLE; case LAB -> Tune.LAB_BATTLE; };
+                    Tune battle = BATTLE_RECORDED ? Tune.BATTLE                // the recorded battle theme (the world's own if it's missing)
+                        : switch (theme) { case FOREST -> Tune.FOREST_BATTLE; case CITY -> Tune.CITY_BATTLE; case LAB -> Tune.LAB_BATTLE; };
                     yield new Choice(battle, mood, muffled, bed, 0.35);
                 }
                 if (w.musicHushed()) yield new Choice(calm, Mood.CALM, muffled, bed, 0.6, true);   // talking to someone: just the forest around you
