@@ -36,6 +36,7 @@ final class RunHud {
     private final Font f30b = new Font(Font.SANS_SERIF, Font.BOLD, 30);
     private final Font f54b = new Font(Font.SANS_SERIF, Font.BOLD, 54);
     private final Minimap minimap = new Minimap();
+    private final Baked baked = new Baked();
 
     private static final Color GOLD = new Color(255, 214, 80);
     private static final Color XP = new Color(90, 190, 255);
@@ -162,18 +163,30 @@ final class RunHud {
         }
     }
 
+    /**
+     * A skill's slot: its icon in a box, darkened by a sweep while it's {@code cooling} down (0..1), with its rank in the
+     * corner. The box and the frame are baked (they only change when the rank does); only the sweep is drawn live.
+     */
     private void slot(Graphics2D g, Perk k, int rank, double x, double y, double size, double cooling) {
-        RoundRectangle2D box = new RoundRectangle2D.Double(x, y, size, size, 9, 9);
-        g.setColor(new Color(16, 16, 24, 225));
-        g.fill(box);
-        drawIcon(g, k, x + size / 2, y + size / 2 - 2, size * 0.78, rank >= Perk.EVOLVED);
+        double pad = 3;
+        baked.draw(g, List.of("slot", k, rank >= Perk.EVOLVED, size), x - pad, y - pad, size + 2 * pad, size + 2 * pad, bg -> {
+            bg.setColor(new Color(16, 16, 24, 225));
+            bg.fill(new RoundRectangle2D.Double(pad, pad, size, size, 9, 9));
+            drawIcon(bg, k, pad + size / 2, pad + size / 2 - 2, size * 0.78, rank >= Perk.EVOLVED);
+        });
         if (cooling > 0) {
             Shape saved = g.getClip();
-            g.clip(box);
+            g.clip(new RoundRectangle2D.Double(x, y, size, size, 9, 9));
             g.setColor(new Color(0, 0, 0, 150));
             g.fill(new Arc2D.Double(x - size * 0.3, y - size * 0.3, size * 1.6, size * 1.6, 90, 360 * cooling, Arc2D.PIE));
             g.setClip(saved);
         }
+        baked.draw(g, List.of("frame", k, rank, size), x - pad, y - pad, size + 2 * pad, size + 2 * pad, bg -> slotFrame(bg, k, rank, pad, pad, size));
+    }
+
+    /** A slot's border and its rank in the corner. */
+    private void slotFrame(Graphics2D g, Perk k, int rank, double x, double y, double size) {
+        RoundRectangle2D box = new RoundRectangle2D.Double(x, y, size, size, 9, 9);
         g.setColor(rank >= Perk.EVOLVED ? GOLD : Util.alpha(k.color, 0.8));
         g.setStroke(new BasicStroke(rank >= Perk.EVOLVED ? 2.6f : 1.6f));
         g.draw(box);
@@ -238,19 +251,24 @@ final class RunHud {
         double ang = Math.atan2(sy - cy, sx - cx);
         double ex = Util.clamp(sx, 40, width - 40), ey = Util.clamp(sy, 110, height - 130);
         AffineTransform saved = g.getTransform();
+        Object interpolation = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
         g.translate(ex, ey);
         g.rotate(ang);
-        Path2D arrow = new Path2D.Double();
-        arrow.moveTo(16, 0);
-        arrow.lineTo(-10, -11);
-        arrow.lineTo(-5, 0);
-        arrow.lineTo(-10, 11);
-        arrow.closePath();
-        g.setColor(new Color(0, 0, 0, 160));
-        g.setStroke(new BasicStroke(4f));
-        g.draw(arrow);
-        g.setColor(c);
-        g.fill(arrow);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);   // baked pointing right, turned smoothly
+        baked.draw(g, List.of("arrow", c), -20, -20, 44, 40, bg -> {           // (room for the outline's sharp corners)
+            Path2D arrow = new Path2D.Double();
+            arrow.moveTo(36, 20);
+            arrow.lineTo(10, 9);
+            arrow.lineTo(15, 20);
+            arrow.lineTo(10, 31);
+            arrow.closePath();
+            bg.setColor(new Color(0, 0, 0, 160));
+            bg.setStroke(new BasicStroke(4f));
+            bg.draw(arrow);
+            bg.setColor(c);
+            bg.fill(arrow);
+        });
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpolation == null ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR : interpolation);
         g.setTransform(saved);
     }
 
@@ -323,7 +341,6 @@ final class RunHud {
 
     private void drawCard(Graphics2D g, World w, Perk.Choice c, double x, double y, double cw, double ch, Player p, double s) {
         Perk k = c.perk();
-        Color accent = k == null || c.evolution() ? GOLD : k.color;
         if (c.evolution()) {                                                     // an evolution glows gold
             double pulse = 0.5 + 0.5 * Math.sin(System.nanoTime() / 1.6e8);
             for (int i = 3; i >= 1; i--) {
@@ -331,6 +348,15 @@ final class RunHud {
                 g.fill(new RoundRectangle2D.Double(x - i * 5 * s, y - i * 5 * s, cw + i * 10 * s, ch + i * 10 * s, 20 + i * 8, 20 + i * 8));
             }
         }
+        int now = k == null ? 0 : p.perk[k.ordinal()];
+        double pad = 8 * s;                                                      // the card's outline and the text's shadows reach a little past its edge
+        baked.draw(g, List.of("card", c, now, cw, ch, s), x - pad, y - pad, cw + 2 * pad, ch + 2 * pad, bg -> paintCard(bg, c, now, pad, pad, cw, ch, s));
+    }
+
+    /** A card's face (everything but an evolution's pulsing glow); {@code now} is the rank the player holds. */
+    private void paintCard(Graphics2D g, Perk.Choice c, int now, double x, double y, double cw, double ch, double s) {
+        Perk k = c.perk();
+        Color accent = k == null || c.evolution() ? GOLD : k.color;
         RoundRectangle2D card = MenuStyle.card(g, x, y, cw, ch, accent);
         g.setColor(Util.alpha(accent, c.evolution() ? 0.95 : 0.55));
         g.setStroke(new BasicStroke((float) ((c.evolution() ? 2.4 : 1.6) * s)));
@@ -342,7 +368,6 @@ final class RunHud {
             name = c.rank() == -1 ? "Treasure" : "Rest";
             text = c.rank() == -1 ? "You've mastered everything. Take 40 gold." : "You've mastered everything. Heal 40% of your health.";
         } else {
-            int now = p.perk[k.ordinal()];
             name = k.title(c.rank());
             text = c.rank() == 1 && k.kind == Perk.Kind.SKILL ? k.blurb + " " + k.text(1) : k.text(c.rank());
             if (c.evolution()) tag = "EVOLUTION";
