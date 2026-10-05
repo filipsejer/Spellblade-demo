@@ -156,12 +156,15 @@ final class MenuStyle {
      * the edges, so whatever's drawn on top reads while the fight stays visible behind it.
      */
     static void veil(Graphics2D g, int width, int height, int alpha) {
+        Object aa = g.getRenderingHint(RenderingHints.KEY_ANTIALIASING);   // a screen-sized rectangle needs no smooth edges, and filling
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);   // it with them is slow
         g.setColor(new Color(6, 6, 16, alpha));
         g.fillRect(0, 0, width, height);
         float r = (float) (Math.hypot(width, height) / 2);
         g.setPaint(new java.awt.RadialGradientPaint(width / 2f, height / 2f, r, new float[]{0f, 0.55f, 1f},
             new Color[]{new Color(0, 0, 0, 0), new Color(0, 0, 0, 40), new Color(0, 0, 0, 170)}));
         g.fillRect(0, 0, width, height);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa);
     }
 
     /** A light sweeping across a heading every {@code cycle} seconds. */

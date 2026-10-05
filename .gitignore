@@ -15,5 +15,7 @@ hs_err_pid*.log
 # dev scratch files: screenshots and audio taken while tuning graphics and sound (not part of the game)
 *.wav
 *.m4a
+# ...but the recorded music in res/music is part of the game
+!res/music/*.wav
 [0-9]*_*.png
 audio_*.png

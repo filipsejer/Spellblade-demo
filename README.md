@@ -15,7 +15,8 @@ down the road south; chapter 3 is **Stormcliff**, Doctor Morrow's laboratory up 
 ends. The monsters, bosses, the forest's trees and rocks, the nests, the crates and the chests are drawn pixel art
 made with [PixelLab](https://pixellab.ai) (the PNGs in `res/art`); everything else is pixel art painted by code at
 startup (see **Graphics engine**), the forest's, the city's and Stormcliff's ground and scenery painted to match the
-drawn art. All the music and sound effects are synthesised by code (there are no audio files; see **Sound engine**).
+drawn art. The main menu's music and the battle music are recordings (`res/music`); all the other music and every
+sound effect are synthesised by code (see **Sound engine**).
 
 ## Just want to play it?
 
@@ -360,13 +361,14 @@ them, in `audio.properties`. `-Dspellblade.home=<folder>` moves it all.
 | `Minimap.java` | The round radar in the top-right corner |
 | `Dialogue.java` | The speech box's rules: typewriter text, lines that wait for a key or are called out, the voice's chirps |
 | `PixelCanvas.java` / `Sprite.java` / `Art.java` | The graphics engine: a pixel painting canvas, an anchored sprite, and the sprite atlas |
+| `Baked.java` | Drawings that rarely change (cards, skill slots, shadows, the radar's bezel) drawn once into an image and reused, so the CPU isn't redrawing smooth shapes 60 times a second |
 | `ImportedArt.java` / `res/art/` | The drawn (PixelLab) sprites and the poses made from them |
 | `PeopleArt.java` / `TownArt.java` / `CityFolk.java` / `LabFolk.java` / `Doll.java` | The hero, the forest's people and stalls, Lumen's (Vell, Juno, Gus, Pip, Sable's and Nix's counters) and Stormcliff's (Ilse, Fern, Brass's and Quill's counters), painted at the drawn art's pixel size and shaded like it by `Doll` |
 | `SwordArt.java` | The hero's swords, drawn apart from him: one for each kind of weapon and rarity, painted at whatever angle a pose holds it |
 | `CreatureArt.java` / `FxArt.java` / `RunArt.java` / `BreakableArt.java` | Painted enemies (the fallback for the drawn ones), effects, pickups and item icons, crates |
 | `Effect.java` / `PixelFont.java` | Short-lived visuals (slashes, bursts, particles, damage numbers) and the tiny font the numbers are drawn in |
 | `Theme.java` / `ThemeArt.java` / `ForestArt.java` / `CityArt.java` / `LabArt.java` | The forest, city and Stormcliff looks: floors, walls, colours, scenery, and Copper, the stasis engine and the vine walls (`LabArt`), all painted to match the drawn art |
-| `Music*.java`, `Song*.java`, `Instruments.java`, `Sfx*.java`, `Sx.java`, `Audio*.java`, `GameAudio.java`, `Dsp.java`, `Snd.java` | The sound engine (below) |
+| `Music*.java`, `Song*.java`, `Track.java`, `Instruments.java`, `Sfx*.java`, `Sx.java`, `Audio*.java`, `GameAudio.java`, `Dsp.java`, `Snd.java` | The sound engine (below) |
 
 ## Graphics engine
 
@@ -497,14 +499,19 @@ in `CreatureArt`.
 
 ## Sound engine
 
-Everything you hear is made by code, in real time or when the game starts, with `javax.sound` (part of the JDK) only used to
+Everything you hear except the two recorded themes is made by code, in real time or when the game starts, with `javax.sound` (part of the JDK) only used to
 send the finished audio to the speakers. **Sound never slows the game down**: the game thread only drops requests in a queue,
 and a separate audio thread mixes 44.1 kHz stereo in 512-frame blocks (about 11 ms). If there is no sound device (or the device
 fails) the game just runs silent; if something goes wrong in one block the audio thread plays silence for it and carries on.
 The sound effects are painted in about half a second on the audio thread, in parallel with opening the speakers, so the window
 never waits (on a Mac the very first open of the speakers can take a few seconds; music and sounds start when it's ready).
 
-- **The music** is nine pieces, of 16 or 32 bars, written by hand as notes over a chord progression, played live on the synthesised
+- **Two recordings:** the main menu's theme (`res/music/main_menu.wav`, 96 s) and the battle theme every fight plays, in
+  every world (`res/music/battle.wav`, 32 bars at 162 bpm). Each (`Track`) is read on a background thread the first time
+  it's wanted, so nothing waits for it, then looped from the top, and crossfades like any other piece. A recording doesn't
+  swell with the action the way the written pieces do. If a file is missing, the written piece it replaced plays instead:
+  the forest's tune on the menu, or the world's own battle theme in a fight.
+- **The written music** is nine pieces, of 16 or 32 bars, written by hand as notes over a chord progression, played live on the synthesised
   instruments. Every piece is split into *layers* (pad, bass, melody, drums...) and each layer has a volume for each mood, so the
   score changes with the action without ever restarting or losing the beat:
   - **Forest** (G major, 96 bpm): a flute tune over harp and a warm pad, for wandering the forest.
@@ -546,7 +553,9 @@ never waits (on a Mac the very first open of the speakers can take a few seconds
 To change the sound: melodies and chords are in `Songs.java` (each bar of a melody must add up to 16 sixteenths, checked when the
 song is built); a part's volume per mood is the three numbers after its name, and its balance is in the `TRIM` table (re-measure
 with the sound tests after changing an instrument). Sound effect recipes are in `SfxSynth.java`; how loud each is meant to be is the
-first number in `Snd.java`. Default volumes are in `AudioSettings.java`; the saved settings are in `~/.spellblade/audio.properties`.
+first number in `Snd.java`. To replace a recording, put the new file in its place in `res/music` (uncompressed PCM
+at 44.1 kHz, 16- or 24-bit; 16-bit keeps the download smaller) and set `Songs.MAIN_MENU_TRIM` or `BATTLE_TRIM` so it's
+as loud as the rest (by A-weighted loudness, like the other pieces). Default volumes are in `AudioSettings.java`; the saved settings are in `~/.spellblade/audio.properties`.
 
 ## Where to tune things
 

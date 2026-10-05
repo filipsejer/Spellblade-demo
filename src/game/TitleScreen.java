@@ -70,8 +70,12 @@ final class TitleScreen {
         g.fillRect(0, 0, (int) side + 1, height);
     }
 
+    /** Each firefly's glow, baked once (drawn afresh, 88 soft circles a frame kept the menu surprisingly busy). */
+    private static final Baked FIREFLY = new Baked();
+
     /** Small lights drifting up and twinkling, the same ones every time (placed by index, moved by the clock). */
     private static void fireflies(Graphics2D g, double t, int width, int height) {
+        Composite saved = g.getComposite();
         for (int i = 0; i < 44; i++) {
             double fx = frac(Math.sin(i * 12.9898) * 43758.5453), fy = frac(Math.sin(i * 78.233) * 12345.678), fz = frac(Math.sin(i * 3.17) * 999.13);
             double x = fx * width + Math.sin(t * (0.3 + fy * 0.5) + i) * 28;
@@ -79,11 +83,15 @@ final class TitleScreen {
             double a = 0.25 + 0.75 * Math.abs(Math.sin(t * (0.8 + fy * 1.7) + i * 1.3));
             Color c = i % 5 == 0 ? new Color(170, 255, 190) : new Color(255, 214, 130);
             double halo = 5 + fz * 4;
-            g.setColor(Util.alpha(c, 0.13 * a));
-            g.fill(new Ellipse2D.Double(x - halo, y - halo, halo * 2, halo * 2));
-            g.setColor(Util.alpha(c, 0.9 * a));
-            g.fill(new Ellipse2D.Double(x - 1.4, y - 1.4, 2.8, 2.8));
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float) a));   // it pulses
+            FIREFLY.draw(g, i, x - halo, y - halo, halo * 2, halo * 2, bg -> {
+                bg.setColor(Util.alpha(c, 0.13));
+                bg.fill(new Ellipse2D.Double(0, 0, halo * 2, halo * 2));
+                bg.setColor(Util.alpha(c, 0.9));
+                bg.fill(new Ellipse2D.Double(halo - 1.4, halo - 1.4, 2.8, 2.8));
+            });
         }
+        g.setComposite(saved);
     }
 
     private static double frac(double v) { return v - Math.floor(v); }

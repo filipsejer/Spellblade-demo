@@ -56,6 +56,8 @@ final class Song {
     final List<String> chords = new ArrayList<>();
     /** Seconds the song takes to fade in when it starts. */
     double fadeIn = 1.2;
+    /** A recording played in place of the written parts (null for a written song); see {@link #recorded}. */
+    Track track;
 
     Song(String id, double bpm, int bars, double reverbRoom, double reverbDamp, double echoBeats) {
         this.id = id;
@@ -64,6 +66,14 @@ final class Song {
         this.reverbRoom = reverbRoom;
         this.reverbDamp = reverbDamp;
         this.echoBeats = echoBeats;
+    }
+
+    /** A song that is a recording rather than written parts: it has no layers, and the mood doesn't change it. */
+    static Song recorded(String id, Track track) {
+        Song s = new Song(id, 120, 1, 0, 0, 0.5);
+        s.track = track;
+        track.preload();
+        return s;
     }
 
     int ticks() { return bars * 16; }

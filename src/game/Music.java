@@ -10,7 +10,8 @@ import java.util.List;
 /**
  * The live orchestra. It plays a {@link Song} in real time, note by note, on the instruments in {@link Instruments}.
  * The song's layers fade in and out as the {@link Mood} changes, so fights swell in without the tune stopping, and
- * switching to a different song is a crossfade. It only ever runs on the audio thread (or, in tests, on the thread
+ * switching to a different song is a crossfade. A recorded song ({@link Track}) is played back as it is, looping, and
+ * crossfades the same way. It only ever runs on the audio thread (or, in tests, on the thread
  * that calls {@link #render}); the game talks to it through {@link AudioEngine}.
  */
 final class Music {
@@ -169,6 +170,7 @@ final class Music {
             echoIn = new float[MAX_BLOCK], wetL = new float[MAX_BLOCK], wetR = new float[MAX_BLOCK];
         private final double tickLen;
         private long samplePos, tickCount;
+        private int trackPos;
         private double nextTickAt;
         private double fade, fadeTarget, fadeStep;
         private Mood mood;
@@ -202,6 +204,10 @@ final class Music {
         boolean finished() { return fadeTarget == 0 && fade <= 0; }
 
         void render(float[] outL, float[] outR, int n) {
+            if (song.track != null) {
+                renderTrack(outL, outR, n);
+                return;
+            }
             int done = 0;
             while (done < n) {
                 if (samplePos >= nextTickAt) {
@@ -215,6 +221,27 @@ final class Music {
                 samplePos += chunk;
                 done += chunk;
             }
+        }
+
+        /** A recording: played from the top as soon as it has loaded (silent until then), and round again when it ends. */
+        private void renderTrack(float[] outL, float[] outR, int n) {
+            Track t = song.track;
+            int frames = t.frames();
+            for (int i = 0; i < n; i++) {
+                float f = nextFade();
+                if (frames == 0) continue;
+                f *= t.gain;
+                outL[i] += t.left(trackPos) * f;
+                outR[i] += t.right(trackPos) * f;
+                if (++trackPos >= frames) trackPos = 0;
+            }
+        }
+
+        /** Moves the fade on by one sample; the eased gain to play it at. */
+        private float nextFade() {
+            if (fade < fadeTarget) fade = Math.min(fadeTarget, fade + fadeStep);
+            else if (fade > fadeTarget) fade = Math.max(fadeTarget, fade - fadeStep);
+            return (float) (fade * fade * (3 - 2 * fade));
         }
 
         /** Everything that happens on one sixteenth: notes end, notes begin. */
@@ -274,9 +301,7 @@ final class Music {
             reverb.process(revIn, wetL, wetR, n, 3.0f);
             echo.process(echoIn, wetL, wetR, n, 0.9f);
             for (int i = 0; i < n; i++) {
-                if (fade < fadeTarget) fade = Math.min(fadeTarget, fade + fadeStep);
-                else if (fade > fadeTarget) fade = Math.max(fadeTarget, fade - fadeStep);
-                float f = (float) (fade * fade * (3 - 2 * fade));
+                float f = nextFade();
                 outL[off + i] += (dryL[i] + wetL[i]) * f;
                 outR[off + i] += (dryR[i] + wetR[i]) * f;
             }

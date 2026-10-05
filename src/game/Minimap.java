@@ -5,12 +5,14 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
 
 /**
  * A Kingdom Hearts 2 style radar: a round map in the top-right corner with a gold bezel. It's centred on the player
@@ -19,6 +21,10 @@ import java.awt.geom.Rectangle2D;
  *
  * <p>Holding TAB ({@link World#mapZoom}) grows it out of the corner into a big map in the middle of the screen,
  * zoomed out to show everything you've explored, with the areas' names on it.
+ *
+ * <p>The radar is drawn every frame, so what rarely changes is drawn once into an image and reused: the explored map
+ * (redrawn only when you walk into a new area or the map changes) and the bezel. Drawing those smooth-edged shapes
+ * afresh each frame used to take most of a frame's drawing time. The big map, while it's open, is drawn live.
  */
 final class Minimap {
     static final double RADIUS = 86;        // pixels
@@ -39,6 +45,19 @@ final class Minimap {
     /** The big map's radius, as a share of the screen's shorter side. */
     static final double BIG = 0.40;
 
+    /** The explored map at the radar's scale, and what it was drawn from (so it's redrawn only when that changes). */
+    private BufferedImage mapImage;
+    private Level mapLevel;
+    private long mapKey;
+    private double mapScale, mapX0, mapY0;
+    /** The outline of what's explored, for the big map (rebuilt with the image). */
+    private Area mapOutline;
+    /** The bezel round the radar, at its usual size. */
+    private BufferedImage bezelImage;
+    private double bezelScale;
+    /** The radar's backing disc and your arrow, baked. */
+    private final Baked baked = new Baked();
+
     static double centerX(int screenWidth) { return screenWidth - MARGIN - RADIUS; }
 
     static double centerY() { return MARGIN + RADIUS; }
@@ -54,6 +73,7 @@ final class Minimap {
         double radius = lerp(RADIUS, bigRadius, t);
         double cx = lerp(centerX(screenWidth), screenWidth / 2.0, t), cy = lerp(centerY(), screenHeight * 0.54, t);   // (a touch low: the area's name stays readable above it)
         double scale = lerp(SCALE, fit, t);
+        double ds = Baked.deviceScale(g);
         double fx = lerp(p.x, explored.getCenterX(), t), fy = lerp(p.y, explored.getCenterY(), t);
         Ellipse2D disc = new Ellipse2D.Double(cx - radius, cy - radius, radius * 2, radius * 2);
 
@@ -61,8 +81,15 @@ final class Minimap {
             g.setColor(new Color(0, 0, 0, (int) (120 * t)));
             g.fillRect(0, 0, screenWidth, screenHeight);
         }
-        g.setColor(t > 0 ? new Color(BACKDROP.getRed(), BACKDROP.getGreen(), BACKDROP.getBlue(), (int) lerp(BACKDROP.getAlpha(), 238, t)) : BACKDROP);
-        g.fill(disc);
+        if (t == 0) {
+            baked.draw(g, "backdrop", cx - radius, cy - radius, radius * 2, radius * 2, bg -> {
+                bg.setColor(BACKDROP);
+                bg.fill(new Ellipse2D.Double(0, 0, RADIUS * 2, RADIUS * 2));
+            });
+        } else {
+            g.setColor(new Color(BACKDROP.getRed(), BACKDROP.getGreen(), BACKDROP.getBlue(), (int) lerp(BACKDROP.getAlpha(), 238, t)));
+            g.fill(disc);
+        }
 
         AffineTransform screen = g.getTransform();
         Shape savedClip = g.getClip();
@@ -72,13 +99,22 @@ final class Minimap {
         g.translate(-fx, -fy);
         double px = 1 / scale;              // one screen pixel, in world units
 
-        drawMap(g, level, px);
+        updateMap(level, ds);
+        if (t == 0) {                                                      // the radar: the map drawn earlier, one device pixel to one
+            AffineTransform at = new AffineTransform();
+            at.translate(mapX0, mapY0);
+            at.scale(1 / (SCALE * mapScale), 1 / (SCALE * mapScale));
+            g.drawImage(mapImage, at, null);
+        } else {
+            drawMap(g, level, px);
+        }
         drawMarkers(g, w, px);
 
         g.setTransform(screen);
         if (t > 0.5 && level.rooms.size() > 1) drawAreaNames(g, level, cx, cy, scale, fx, fy, (t - 0.5) * 2);
         g.setClip(savedClip);
-        drawBezel(g, cx, cy, radius);
+        if (t == 0) drawCachedBezel(g, cx, cy, ds);
+        else drawBezel(g, cx, cy, radius);
         drawArrow(g, cx + (p.x - fx) * scale, cy + (p.y - fy) * scale, p.facing);
     }
 
@@ -108,26 +144,70 @@ final class Minimap {
         }
     }
 
-    private void drawMap(Graphics2D g, Level level, double px) {
-        Area shown = new Area();
+    /** What the explored map looks like: which level, its shape, and which rooms are known (and how they're coloured). */
+    private static long mapKey(Level level) {
+        long k = level.version;
+        for (Level.Room r : level.rooms) k = k * 31 + ((REVEAL_ALL || r.visited) ? 1 + r.state.ordinal() : 0);
+        return k;
+    }
 
+    /** Redraws the cached map if the level, the explored rooms or the screen's pixel density changed. */
+    private void updateMap(Level level, double ds) {
+        long key = mapKey(level);
+        if (mapImage != null && level == mapLevel && key == mapKey && ds == mapScale) return;
+        mapLevel = level;
+        mapKey = key;
+        mapScale = ds;
+        mapOutline = outline(level);
+        Rectangle2D.Double all = null;                                    // the whole level (so the image's size doesn't change as you explore)
+        for (Level.Room r : level.rooms) for (Rectangle2D.Double p : r.parts) all = union(all, p);
+        for (Level.Door d : level.doors) all = union(all, d.gap);
+        double pad = 4 / SCALE;
+        mapX0 = all.x - pad;
+        mapY0 = all.y - pad;
+        double k = SCALE * ds;
+        int w = (int) Math.ceil((all.width + 2 * pad) * k), h = (int) Math.ceil((all.height + 2 * pad) * k);
+        mapImage = new BufferedImage(Math.max(1, w), Math.max(1, h), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D ig = mapImage.createGraphics();
+        ig.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        ig.scale(k, k);
+        ig.translate(-mapX0, -mapY0);
+        drawMap(ig, level, 1 / SCALE);
+        ig.dispose();
+    }
+
+    private static Rectangle2D.Double union(Rectangle2D.Double a, Rectangle2D.Double b) {
+        if (a == null) return new Rectangle2D.Double(b.x, b.y, b.width, b.height);
+        Rectangle2D.union(a, b, a);
+        return a;
+    }
+
+    /** The outline round every explored room and corridor. */
+    private static Area outline(Level level) {
+        Area shown = new Area();
+        for (Level.Door d : level.doors) if (REVEAL_ALL || d.a.visited || d.b.visited) shown.add(new Area(d.gap));
+        for (Level.Room r : level.rooms) {
+            if (!REVEAL_ALL && !r.visited) continue;
+            for (Rectangle2D.Double p : r.parts) shown.add(new Area(p));
+        }
+        return shown;
+    }
+
+    /** The explored rooms and corridors, and their outline ({@code px} is one radar pixel, in world units). */
+    private void drawMap(Graphics2D g, Level level, double px) {
         for (Level.Door d : level.doors) {
             if (!REVEAL_ALL && !d.a.visited && !d.b.visited) continue;
             g.setColor(CORRIDOR_OPEN);
             g.fill(d.gap);
-            shown.add(new Area(d.gap));
         }
         for (Level.Room r : level.rooms) {
             if (!REVEAL_ALL && !r.visited) continue;
             g.setColor(r.state == Level.Room.State.SAFE ? ROOM_SAFE : ROOM_CLEARED);
-            for (Rectangle2D.Double p : r.parts) {
-                g.fill(p);
-                shown.add(new Area(p));
-            }
+            for (Rectangle2D.Double p : r.parts) g.fill(p);
         }
         g.setColor(WALL);
         g.setStroke(new BasicStroke((float) (1.6 * px)));
-        g.draw(shown);
+        g.draw(mapOutline);
     }
 
     private void drawMarkers(Graphics2D g, World w, double px) {
@@ -232,6 +312,25 @@ final class Minimap {
         g.fill(new Rectangle2D.Double(x - h, y - h, 2 * h, 2 * h));
     }
 
+    /** The bezel at the radar's usual size, drawn once into an image. */
+    private void drawCachedBezel(Graphics2D g, double cx, double cy, double ds) {
+        int half = (int) Math.ceil(RADIUS + 8);
+        if (bezelImage == null || bezelScale != ds) {
+            bezelScale = ds;
+            int size = (int) Math.ceil(2 * half * ds);
+            bezelImage = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D ig = bezelImage.createGraphics();
+            ig.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            ig.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            ig.scale(ds, ds);
+            drawBezel(ig, half, half, RADIUS);
+            ig.dispose();
+        }
+        AffineTransform at = AffineTransform.getTranslateInstance(cx - half, cy - half);
+        at.scale(1 / ds, 1 / ds);
+        g.drawImage(bezelImage, at, null);
+    }
+
     private void drawBezel(Graphics2D g, double cx, double cy, double radius) {
         g.setColor(new Color(10, 12, 22, 220));
         g.setStroke(new BasicStroke(8f));
@@ -254,19 +353,24 @@ final class Minimap {
     /** You: a small arrow (in the middle of the radar, or wherever you are on the big map), pointing the way you're facing. */
     private void drawArrow(Graphics2D g, double cx, double cy, double facing) {
         AffineTransform saved = g.getTransform();
+        Object interpolation = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
         g.translate(cx, cy);
         g.rotate(facing);
-        Path2D arrow = new Path2D.Double();
-        arrow.moveTo(10, 0);
-        arrow.lineTo(-6, 6.5);
-        arrow.lineTo(-2.5, 0);
-        arrow.lineTo(-6, -6.5);
-        arrow.closePath();
-        g.setColor(new Color(10, 12, 22, 230));
-        g.setStroke(new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g.draw(arrow);
-        g.setColor(new Color(255, 250, 225));
-        g.fill(arrow);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);   // baked pointing right, turned smoothly
+        baked.draw(g, "arrow", -9, -9, 22, 18, bg -> {
+            Path2D arrow = new Path2D.Double();
+            arrow.moveTo(19, 9);
+            arrow.lineTo(3, 15.5);
+            arrow.lineTo(6.5, 9);
+            arrow.lineTo(3, 2.5);
+            arrow.closePath();
+            bg.setColor(new Color(10, 12, 22, 230));
+            bg.setStroke(new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            bg.draw(arrow);
+            bg.setColor(new Color(255, 250, 225));
+            bg.fill(arrow);
+        });
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpolation == null ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR : interpolation);
         g.setTransform(saved);
     }
 }

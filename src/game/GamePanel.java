@@ -31,7 +31,8 @@ final class GamePanel extends JPanel {
         addFocusListener(new FocusAdapter() {
             @Override public void focusLost(FocusEvent e) { input.clear(); }
         });
-        timer = new Timer(4, e -> tick());
+        timer = new Timer(1, e -> tick());
+        timer.setRepeats(false);                // each tick books the next for when the next step is due (see tick)
     }
 
     void start() {
@@ -58,6 +59,9 @@ final class GamePanel extends JPanel {
             System.exit(0);
         }
         if (stepped) repaint();
+        // sleep until the next step is due, rather than checking every few milliseconds (that kept the CPU awake)
+        timer.setInitialDelay(Math.max(1, (int) Math.ceil((STEP - accumulator) * 1000)));
+        timer.restart();
     }
 
     /** The window is closing: the game is saved so CONTINUE can pick it up next time. */

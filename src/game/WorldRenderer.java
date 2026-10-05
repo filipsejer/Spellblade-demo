@@ -23,6 +23,8 @@ import java.util.List;
  */
 final class WorldRenderer {
     private final LevelView levelView = new LevelView();
+    /** Shadows and the aura, baked once (drawn afresh, every one of them was a smooth shape worked out on the CPU each frame). */
+    private final Baked baked = new Baked();
     private final Font f12 = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
     private final Font f14b = new Font(Font.SANS_SERIF, Font.BOLD, 14);
 
@@ -230,8 +232,11 @@ final class WorldRenderer {
     }
 
     private void shadow(Graphics2D g, double x, double y, double rx, double ry) {
-        g.setColor(new Color(0, 0, 0, 62));
-        g.fill(new Ellipse2D.Double(x - rx, y - ry, rx * 2, ry * 2));
+        double hx = Math.round(rx * 2) / 2.0, hy = Math.round(ry * 2) / 2.0;      // to the half pixel, so there are only a few to bake
+        baked.draw(g, List.of("shadow", hx, hy), x - hx, y - hy, hx * 2, hy * 2, bg -> {
+            bg.setColor(new Color(0, 0, 0, 62));
+            bg.fill(new Ellipse2D.Double(0, 0, hx * 2, hy * 2));
+        });
     }
 
     // ------------------------------------------------------------------ the hero
@@ -745,12 +750,21 @@ final class WorldRenderer {
         double pulse = Util.clamp(p.auraTick / Arsenal.AURA_TICK, 0, 1);
         boolean evolved = Arsenal.rank(p, Perk.HOLY_AURA) >= Perk.EVOLVED;
         Color c = evolved ? new Color(255, 245, 170) : new Color(255, 220, 110);
-        Ellipse2D disc = new Ellipse2D.Double(p.x - r, p.y - r * 0.8 + 6, r * 2, r * 1.6);
-        g.setColor(Util.alpha(c, 0.10 + 0.10 * pulse));
-        g.fill(disc);
-        g.setColor(Util.alpha(c, 0.45 + 0.3 * pulse));
-        g.setStroke(new BasicStroke(2.5f));
-        g.draw(disc);
+        // baked at its brightest and faded as it pulses (the glow inside, and the ring round it, pulse by different amounts)
+        double pad = 2, x = p.x - r - pad, y = p.y - r * 0.8 + 6 - pad, bw = r * 2 + 2 * pad, bh = r * 1.6 + 2 * pad;
+        java.awt.Composite saved = g.getComposite();
+        g.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, (float) ((0.10 + 0.10 * pulse) / 0.20)));
+        baked.draw(g, List.of("aura", r, evolved), x, y, bw, bh, bg -> {
+            bg.setColor(Util.alpha(c, 0.20));
+            bg.fill(new Ellipse2D.Double(pad, pad, r * 2, r * 1.6));
+        });
+        g.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, (float) ((0.45 + 0.3 * pulse) / 0.75)));
+        baked.draw(g, List.of("aura ring", r, evolved), x, y, bw, bh, bg -> {
+            bg.setColor(Util.alpha(c, 0.75));
+            bg.setStroke(new BasicStroke(2.5f));
+            bg.draw(new Ellipse2D.Double(pad, pad, r * 2, r * 1.6));
+        });
+        g.setComposite(saved);
     }
 
     /** Orbit Blades: spectral swords circling the player, each pointing along its path. */
