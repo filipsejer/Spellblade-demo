@@ -71,6 +71,12 @@ final class Run {
 
     // level-up / chest choices
     int pendingLevels, pendingChests;
+    /**
+     * Levels gained once the way home is open: with no fighting left there's nothing to choose, so each pays
+     * {@link #LATE_LEVEL_GOLD} when the fight ends instead.
+     */
+    int lateLevels;
+    static final int LATE_LEVEL_GOLD = 30;
     List<Perk.Choice> choices = List.of();
     int choiceCursor;
     String choiceTitle = "";
@@ -89,6 +95,8 @@ final class Run {
     boolean over;
     Outcome outcome;
     int rewardGold, rewardSkillPoints;
+    /** Gold for the levels gained after the guardian fell (see {@link #lateLevels}), paid at the end. */
+    int lateGold;
     boolean firstClear;
 
     private Run(Challenge c, long seed, int loops) {
@@ -923,6 +931,10 @@ final class Run {
     /** The end of the fight: gems and gold fly to you, a chest drops, and a portal home opens beside it. */
     private void openWayHome(World w, double x, double y, boolean boss) {
         bossDead = true;
+        lateLevels += pendingLevels;                           // anything still waiting to be chosen is moot now: levels turn to gold,
+        pendingLevels = 0;                                     // and a chest's cards are dropped (its item is already yours)
+        pendingChests = 0;
+        unseen.clear();
         for (Pickup pk : pickups) if (pk.kind == Pickup.Kind.GEM || pk.kind == Pickup.Kind.COIN) pk.attracted = true;
         for (Enemy e : w.enemies) if (!e.rooted()) e.hp = 0;
         Util.Vec chest = clearSpot(w, x, y, 40);
@@ -1079,8 +1091,9 @@ final class Run {
         chestBurst(w, pk.x, pk.y, new Color(255, 150, 60));
         w.effects.add(Effect.text(pk.x, pk.y - 50, "+" + g + " GOLD", new Color(255, 214, 80), true));
         double[] odds = Item.odds(challenge.world, challenge.boss ? Item.Source.GUARDIAN : Item.Source.CHEST, loops);
-        findItem(w, Item.roll(rng, Item.rarity(rng, odds), tier()));
-        pendingChests++;
+        Item it = Item.roll(rng, Item.rarity(rng, odds), tier());
+        findItem(w, it);
+        unseen.remove(it);                                     // just the item: the fighting's over, so no cards (the results screen shows it)
     }
 
     private void findItem(World w, Item it) {
@@ -1123,8 +1136,15 @@ final class Run {
             levels++;
         }
         if (levels == 0) return;
-        pendingLevels += levels;
         Color gold = new Color(255, 220, 90);
+        if (bossDead) {                                        // the fight's won: no cards, gold at the end instead
+            lateLevels += levels;
+            w.effects.add(Effect.text(p.x, p.y - 60, "LEVEL UP!", gold, true));
+            w.effects.add(Effect.text(p.x, p.y - 96, "+" + levels * LATE_LEVEL_GOLD + " GOLD", gold, false));
+            w.sound(Snd.LEVEL_UP);
+            return;
+        }
+        pendingLevels += levels;
         w.effects.add(Effect.text(p.x, p.y - 60, "LEVEL UP!", gold, true));
         w.effects.add(Effect.ring(p.x, p.y, 10, 80, 0.5, gold, true));
         w.sound(Snd.LEVEL_UP);
@@ -1132,7 +1152,7 @@ final class Run {
 
     /** After the frame: if a level-up or a chest is waiting, stop the action and show the choices. */
     void maybeOpenChoices(World w) {
-        if (w.state != World.State.PLAYING || w.player.hp <= 0) return;
+        if (w.state != World.State.PLAYING || w.player.hp <= 0 || bossDead) return;
         if (pendingLevels > 0) openChoices(w, "LEVEL UP!");
         else if (pendingChests > 0) openChoices(w, "TREASURE!");
     }
@@ -1217,7 +1237,8 @@ final class Run {
             a.wins++;
             a.restock(challenge.world);
         }
-        prof.gold += gold + rewardGold;
+        lateGold = lateLevels * LATE_LEVEL_GOLD;
+        prof.gold += gold + rewardGold + lateGold;
         prof.add(loot);
         prof.runs++;
         if (how == Outcome.VICTORY) prof.victories++;

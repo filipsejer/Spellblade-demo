@@ -116,7 +116,7 @@ final class RunHud {
         if (ward != null && boss == null && run.nestsLeft > 0) drawWardBar(g, w, ward, width);
 
         if (w.mapZoom <= 0) minimap.draw(g, w, width, height);   // (held open, the Renderer draws it over everything else)
-        drawSkillSlots(g, p, height);
+        drawSkillSlots(g, p, height, run.bossDead);
         drawArrows(g, w, run, width, height);
 
         g.setFont(f12);
@@ -138,8 +138,8 @@ final class RunHud {
         }
     }
 
-    /** Your skills (big boxes, with their recharge) and passives (small ones), bottom left. */
-    private void drawSkillSlots(Graphics2D g, Player p, int height) {
+    /** Your skills (big boxes, with their recharge) and passives (small ones), bottom left; {@code won}: no more are coming. */
+    private void drawSkillSlots(Graphics2D g, Player p, int height, boolean won) {
         double x = 18, y = height - 104;
         for (Perk k : Perk.values()) {
             if (k.kind != Perk.Kind.SKILL || p.perk[k.ordinal()] == 0) continue;
@@ -149,7 +149,7 @@ final class RunHud {
             slot(g, k, r, x, y, 46, frac);
             x += 52;
         }
-        if (x == 18) {
+        if (x == 18 && !won) {
             g.setFont(f12);
             g.setColor(DIM_TEXT);
             g.drawString("Only your sword for now: level up to learn skills", (float) x, (float) (y + 28));
@@ -336,7 +336,7 @@ final class RunHud {
         g.setFont(MenuStyle.serif(Font.ITALIC, 14 * s, 0));
         MenuStyle.centred(g, "Skills " + Perk.owned(p, Perk.Kind.SKILL) + " / " + Perk.SKILL_SLOTS + DOT + "Passives " + Perk.owned(p, Perk.Kind.PASSIVE)
             + " / " + Perk.PASSIVE_SLOTS + DOT + "a maxed skill evolves once you also own its partner passive", cx, ky + 28 * s, MenuStyle.DIM);
-        drawSkillSlots(g, p, height);
+        drawSkillSlots(g, p, height, run.bossDead);
     }
 
     private void drawCard(Graphics2D g, World w, Perk.Choice c, double x, double y, double cw, double ch, Player p, double s) {
@@ -565,14 +565,15 @@ final class RunHud {
         // what you take home
         double gy = ty + 94 * s;
         g.setFont(MenuStyle.serif(Font.BOLD, 26 * s, 0.03));
-        String goldText = "+" + (run.gold + run.rewardGold) + " gold" + (run.rewardSkillPoints > 0 ? "      +" + run.rewardSkillPoints + " skill point" + (run.rewardSkillPoints == 1 ? "" : "s") : "");
+        String goldText = "+" + (run.gold + run.rewardGold + run.lateGold) + " gold" + (run.rewardSkillPoints > 0 ? "      +" + run.rewardSkillPoints + " skill point" + (run.rewardSkillPoints == 1 ? "" : "s") : "");
         FontMetrics gm = g.getFontMetrics();
         double gw = gm.stringWidth(goldText) + 30 * s;
         Art.frame("run.coin", System.nanoTime() / 1e9, 6).draw(g, cx - gw / 2 + 8 * s, gy - 8 * s, 3.4 * s, false);
         MenuStyle.shadowed(g, goldText, cx - gw / 2 + 30 * s, gy, GOLD);
         if (won) {
             g.setFont(MenuStyle.sans(Font.PLAIN, 13 * s));
-            MenuStyle.centred(g, run.gold + " picked up" + DOT + run.rewardGold + " reward" + (run.rewardSkillPoints > 0 ? DOT + "spend skill points with " + Worlds.trainer(run.challenge.world) : ""),
+            MenuStyle.centred(g, run.gold + " picked up" + DOT + run.rewardGold + " reward"
+                + (run.lateGold > 0 ? DOT + run.lateGold + " for " + run.lateLevels + " level" + (run.lateLevels == 1 ? "" : "s") + " after the win" : "") + (run.rewardSkillPoints > 0 ? DOT + "spend skill points with " + Worlds.trainer(run.challenge.world) : ""),
                 cx, gy + 22 * s, MenuStyle.DIM);
         }
 
