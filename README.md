@@ -246,7 +246,9 @@ nests in between, so hiding behind a wall doesn't leave the horde stuck in a cor
 - **The guardian.** With the last nest down, the ground shakes, everything ordinary vanishes (leaving its gems), and
   the challenge's guardian arrives inside a red **ring** you can't leave until it's beaten. A challenge without one
   just opens the way home.
-- **The way home:** a chest (gold and an item, always) and a portal back to the gate you came in by.
+- **The way home:** a chest (gold and an item, always, and no cards: the fighting's over) and a portal back to the
+  gate you came in by. Levels gained from here on offer no cards either; each pays `Run.LATE_LEVEL_GOLD` (30 gold)
+  when the fight ends.
 - **The end.** Win, lose or **Retreat** (from the pause menu), you keep the gold you picked up and every item you
   found. A win also pays the challenge's reward of gold and skill points (one more skill point if you reached level 12).
 
